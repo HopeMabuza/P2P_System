@@ -1,0 +1,393 @@
+{
+  "manifestVersion": "3.2",
+  "proxies": [
+    {
+      "address": "0xEADa0d4a857fa8F42E83772e3b1EC7766610Fe6a",
+      "txHash": "0xcdc22ad06392888a1e6a75b02512c4efcc0e537f58f3c6c9fabae9af0216e66c",
+      "kind": "uups"
+    },
+    {
+      "address": "0xDA04c48e782262c37EdD9173F8BeB63f5187115C",
+      "txHash": "0xeeed2393ba5f1b5eaee00715ec65e400577734eb3d99e8c9edf2584cbae8118e",
+      "kind": "uups"
+    }
+  ],
+  "impls": {
+    "8cc9d258c87a9f84ad9c6e1562640b49a622b9e0310052eceea1d9bccac8dca5": {
+      "address": "0x2dF5aBbF48FD38BfebA25B935A30650827816D17",
+      "txHash": "0xbd1f281a7c007716c43021f83f37db9e5c2e1a597b86429ad3a75666bf0889db",
+      "layout": {
+        "solcVersion": "0.8.28",
+        "storage": [
+          {
+            "label": "listings",
+            "offset": 0,
+            "slot": "0",
+            "type": "t_mapping(t_uint256,t_struct(Ad)1856_storage)",
+            "contract": "Escrow",
+            "src": "contracts/Escrow.sol:26"
+          },
+          {
+            "label": "listingCount",
+            "offset": 0,
+            "slot": "1",
+            "type": "t_uint256",
+            "contract": "Escrow",
+            "src": "contracts/Escrow.sol:27"
+          },
+          {
+            "label": "allowedToken",
+            "offset": 0,
+            "slot": "2",
+            "type": "t_address",
+            "contract": "Escrow",
+            "src": "contracts/Escrow.sol:29"
+          }
+        ],
+        "types": {
+          "t_address": {
+            "label": "address",
+            "numberOfBytes": "20"
+          },
+          "t_bool": {
+            "label": "bool",
+            "numberOfBytes": "1"
+          },
+          "t_struct(InitializableStorage)224_storage": {
+            "label": "struct Initializable.InitializableStorage",
+            "members": [
+              {
+                "label": "_initialized",
+                "type": "t_uint64",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "_initializing",
+                "type": "t_bool",
+                "offset": 8,
+                "slot": "0"
+              }
+            ],
+            "numberOfBytes": "32"
+          },
+          "t_struct(OwnableStorage)13_storage": {
+            "label": "struct OwnableUpgradeable.OwnableStorage",
+            "members": [
+              {
+                "label": "_owner",
+                "type": "t_address",
+                "offset": 0,
+                "slot": "0"
+              }
+            ],
+            "numberOfBytes": "32"
+          },
+          "t_uint64": {
+            "label": "uint64",
+            "numberOfBytes": "8"
+          },
+          "t_enum(Status)1836": {
+            "label": "enum Escrow.Status",
+            "members": [
+              "Active",
+              "Locked",
+              "Confirming",
+              "Completed",
+              "Disputed",
+              "Refunded"
+            ],
+            "numberOfBytes": "1"
+          },
+          "t_mapping(t_uint256,t_struct(Ad)1856_storage)": {
+            "label": "mapping(uint256 => struct Escrow.Ad)",
+            "numberOfBytes": "32"
+          },
+          "t_struct(Ad)1856_storage": {
+            "label": "struct Escrow.Ad",
+            "members": [
+              {
+                "label": "seller",
+                "type": "t_address",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "buyer",
+                "type": "t_address",
+                "offset": 0,
+                "slot": "1"
+              },
+              {
+                "label": "arbiter",
+                "type": "t_address",
+                "offset": 0,
+                "slot": "2"
+              },
+              {
+                "label": "token",
+                "type": "t_address",
+                "offset": 0,
+                "slot": "3"
+              },
+              {
+                "label": "tokenAmount",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "4"
+              },
+              {
+                "label": "ethPrice",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "5"
+              },
+              {
+                "label": "status",
+                "type": "t_enum(Status)1836",
+                "offset": 0,
+                "slot": "6"
+              },
+              {
+                "label": "sellerConfirmed",
+                "type": "t_bool",
+                "offset": 1,
+                "slot": "6"
+              },
+              {
+                "label": "buyerConfirmed",
+                "type": "t_bool",
+                "offset": 2,
+                "slot": "6"
+              }
+            ],
+            "numberOfBytes": "224"
+          },
+          "t_uint256": {
+            "label": "uint256",
+            "numberOfBytes": "32"
+          }
+        },
+        "namespaces": {
+          "erc7201:openzeppelin.storage.Ownable": [
+            {
+              "contract": "OwnableUpgradeable",
+              "label": "_owner",
+              "type": "t_address",
+              "src": "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol:24",
+              "offset": 0,
+              "slot": "0"
+            }
+          ],
+          "erc7201:openzeppelin.storage.Initializable": [
+            {
+              "contract": "Initializable",
+              "label": "_initialized",
+              "type": "t_uint64",
+              "src": "@openzeppelin/contracts/proxy/utils/Initializable.sol:69",
+              "offset": 0,
+              "slot": "0"
+            },
+            {
+              "contract": "Initializable",
+              "label": "_initializing",
+              "type": "t_bool",
+              "src": "@openzeppelin/contracts/proxy/utils/Initializable.sol:73",
+              "offset": 8,
+              "slot": "0"
+            }
+          ]
+        }
+      }
+    },
+    "4ee993bf0dcbe05f7ecb7a1d8fae0b40c4c9dea4c5a729cec39249785e831579": {
+      "address": "0x713EbEcea9A17c22c9033e83e0EF54D79C7Dbb8c",
+      "txHash": "0x9bbc599d64c48de8698ec191e681329053d0df0d40f2da6122dd9bd2a0f7be10",
+      "layout": {
+        "solcVersion": "0.8.28",
+        "storage": [
+          {
+            "label": "listings",
+            "offset": 0,
+            "slot": "0",
+            "type": "t_mapping(t_uint256,t_struct(Ad)2389_storage)",
+            "contract": "Escrow",
+            "src": "contracts/Escrow.sol:26"
+          },
+          {
+            "label": "listingCount",
+            "offset": 0,
+            "slot": "1",
+            "type": "t_uint256",
+            "contract": "Escrow",
+            "src": "contracts/Escrow.sol:27"
+          },
+          {
+            "label": "allowedToken",
+            "offset": 0,
+            "slot": "2",
+            "type": "t_address",
+            "contract": "Escrow",
+            "src": "contracts/Escrow.sol:29"
+          },
+          {
+            "label": "arbiter",
+            "offset": 0,
+            "slot": "3",
+            "type": "t_address",
+            "contract": "Escrow",
+            "src": "contracts/Escrow.sol:30"
+          }
+        ],
+        "types": {
+          "t_address": {
+            "label": "address",
+            "numberOfBytes": "20"
+          },
+          "t_bool": {
+            "label": "bool",
+            "numberOfBytes": "1"
+          },
+          "t_struct(InitializableStorage)307_storage": {
+            "label": "struct Initializable.InitializableStorage",
+            "members": [
+              {
+                "label": "_initialized",
+                "type": "t_uint64",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "_initializing",
+                "type": "t_bool",
+                "offset": 8,
+                "slot": "0"
+              }
+            ],
+            "numberOfBytes": "32"
+          },
+          "t_struct(OwnableStorage)13_storage": {
+            "label": "struct OwnableUpgradeable.OwnableStorage",
+            "members": [
+              {
+                "label": "_owner",
+                "type": "t_address",
+                "offset": 0,
+                "slot": "0"
+              }
+            ],
+            "numberOfBytes": "32"
+          },
+          "t_uint64": {
+            "label": "uint64",
+            "numberOfBytes": "8"
+          },
+          "t_enum(Status)2371": {
+            "label": "enum Escrow.Status",
+            "members": [
+              "Active",
+              "Locked",
+              "Confirming",
+              "Completed",
+              "Disputed",
+              "Refunded"
+            ],
+            "numberOfBytes": "1"
+          },
+          "t_mapping(t_uint256,t_struct(Ad)2389_storage)": {
+            "label": "mapping(uint256 => struct Escrow.Ad)",
+            "numberOfBytes": "32"
+          },
+          "t_struct(Ad)2389_storage": {
+            "label": "struct Escrow.Ad",
+            "members": [
+              {
+                "label": "seller",
+                "type": "t_address",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "buyer",
+                "type": "t_address",
+                "offset": 0,
+                "slot": "1"
+              },
+              {
+                "label": "token",
+                "type": "t_address",
+                "offset": 0,
+                "slot": "2"
+              },
+              {
+                "label": "tokenAmount",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "3"
+              },
+              {
+                "label": "ethPrice",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "4"
+              },
+              {
+                "label": "status",
+                "type": "t_enum(Status)2371",
+                "offset": 0,
+                "slot": "5"
+              },
+              {
+                "label": "sellerConfirmed",
+                "type": "t_bool",
+                "offset": 1,
+                "slot": "5"
+              },
+              {
+                "label": "buyerConfirmed",
+                "type": "t_bool",
+                "offset": 2,
+                "slot": "5"
+              }
+            ],
+            "numberOfBytes": "192"
+          },
+          "t_uint256": {
+            "label": "uint256",
+            "numberOfBytes": "32"
+          }
+        },
+        "namespaces": {
+          "erc7201:openzeppelin.storage.Ownable": [
+            {
+              "contract": "OwnableUpgradeable",
+              "label": "_owner",
+              "type": "t_address",
+              "src": "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol:24",
+              "offset": 0,
+              "slot": "0"
+            }
+          ],
+          "erc7201:openzeppelin.storage.Initializable": [
+            {
+              "contract": "Initializable",
+              "label": "_initialized",
+              "type": "t_uint64",
+              "src": "@openzeppelin/contracts/proxy/utils/Initializable.sol:69",
+              "offset": 0,
+              "slot": "0"
+            },
+            {
+              "contract": "Initializable",
+              "label": "_initializing",
+              "type": "t_bool",
+              "src": "@openzeppelin/contracts/proxy/utils/Initializable.sol:73",
+              "offset": 8,
+              "slot": "0"
+            }
+          ]
+        }
+      }
+    }
+  }
+}
