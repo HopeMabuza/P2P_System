@@ -132,15 +132,43 @@ export default function App() {
         </main>
       ) : (
         <div className="hero">
-          <div className="hero-content">
-            <div className="hero-icon">
-              <UsdcIcon size={52} />
+          {/* Animated background blobs */}
+          <div className="hero-bg">
+            <div className="blob b1" />
+            <div className="blob b2" />
+            <div className="blob b3" />
+          </div>
+
+          {/* Orbital animation — the "live symbol" */}
+          <div className="orbital">
+            <div className="o-ring r1" />
+            <div className="o-ring r2" />
+            <div className="o-dot d1" />
+            <div className="o-dot d2" />
+            <div className="o-dot d3" />
+            <div className="o-dot d4" />
+            <div className="o-pulse p1" />
+            <div className="o-pulse p2" />
+            <div className="o-center">
+              <UsdcIcon size={48} />
             </div>
-            <h1 className="hero-title">Stablecoin Marketplace</h1>
+          </div>
+
+          {/* Hero text */}
+          <div className="hero-text">
+            <h1 className="hero-title">Stablecoin<br />Marketplace</h1>
+
+            <div className="hero-tags">
+              <span className="htag htag-speed">⚡ Fast</span>
+              <span className="htag htag-secure">🔒 Secure</span>
+              <span className="htag htag-chain">⛓ On-Chain</span>
+            </div>
+
             <p className="hero-subtitle">
               Buy and sell USDC with ETH, secured by smart-contract escrow.
               Connect your wallet to view listings and post sell ads.
             </p>
+
             <button className="btn btn-primary btn-lg" onClick={connectWallet}>
               Connect Wallet
             </button>
