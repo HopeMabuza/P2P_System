@@ -1,170 +1,178 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-contract Escrow is Initializable, UUPSUpgradeable, OwnableUpgradeable {
+contract Escrow is UUPSUpgradeable, OwnableUpgradeable {
+    //for adding token to my contract
     using SafeERC20 for IERC20;
 
-    enum Status { Active, Locked, Confirming, Completed, Disputed, Refunded }
+    IERC20 public token;
+    address public arbiterPool;
+    uint256 private _nextAdId;
+
+    uint256 public constant PAYMENT_TIMEOUT = 5 minutes;
+
+    enum Status { Active, InTrade, Paid, Completed, Cancelled, Disputed }
 
     struct Ad {
         address seller;
         address buyer;
-        address token;
+        uint256 zarRate;
+        uint256 zarAmount;
         uint256 tokenAmount;
-        uint256 ethPrice;
+        uint256 paymentDeadline;
         Status  status;
-        bool    sellerConfirmed;
-        bool    buyerConfirmed;
     }
 
-    mapping(uint256 => Ad) public listings;
-    uint256 public listingCount;
+    mapping(uint256 => Ad) public ads;
 
-    address public allowedToken;
-    address public arbiter;
+    event AdCreated(uint256 indexed adId, address indexed seller, uint256 tokenAmount, uint256 zarRate);
+    event TradeInitiated(uint256 indexed adId, address indexed buyer);
+    event PaymentConfirmed(uint256 indexed adId);
+    event FundsReleased(uint256 indexed adId);
+    event AdCancelled(uint256 indexed adId);
+    event TradeExpired(uint256 indexed adId, address indexed expiredBuyer);
+    event DisputeOpened(uint256 indexed adId, address indexed opener);
+    event DisputeResolved(uint256 indexed adId, bool releasedToBuyer);
 
-    event AdPosted(uint256 indexed adId, address indexed seller, address token, uint256 tokenAmount, uint256 ethPrice);
-    event TradeLocked(uint256 indexed adId, address indexed buyer);
-    event Confirmed(uint256 indexed adId, address indexed party);
-    event Disputed(uint256 indexed adId, address indexed party);
-    event Resolved(uint256 indexed adId, address indexed arbiter, bool releaseToBuyer);
-
-    modifier onlyParties(uint256 adId) {
-        require(
-            msg.sender == listings[adId].buyer || msg.sender == listings[adId].seller,
-            "Only buyer or seller"
-        );
+    modifier onlyArbiterPool() {
+        require(msg.sender == arbiterPool, "Only arbiter pool");
         _;
     }
 
-    modifier onlyArbiter() {
-        require(msg.sender == arbiter, "Only the arbiter");
-        _;
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
     }
 
-    modifier inStatus(uint256 adId, Status expected) {
-        require(listings[adId].status == expected, "Invalid status for this action");
-        _;
-    }
-
-
-    function initialize(address _allowedToken, address _arbiter) public initializer {
+    function initialize(address _token, address _arbiterPool) external initializer {
         __Ownable_init(msg.sender);
-        require(_arbiter != address(0), "Invalid arbiter address");
-        allowedToken = _allowedToken;
-        arbiter      = _arbiter;
+        token = IERC20(_token);
+        arbiterPool = _arbiterPool;
     }
 
 
-    function postAd(
-        address _token,
-        uint256 _tokenAmount,
-        uint256 _ethPrice
-    ) external returns (uint256 adId) {
-        require(_token == allowedToken,   "Token not allowed");
-        require(_tokenAmount > 0,         "Token amount must be greater than zero");
-        require(_ethPrice > 0,            "ETH price must be greater than zero");
-        require(msg.sender != arbiter,    "Arbiter cannot be the seller");
+    //takes in rate, price and token amount. Populates the struct with seller, rate, price, token amount and zero address for buyer
+    function createAd(uint256 zarRate, uint256 zarAmount, uint256 tokenAmount) external {
+        require(tokenAmount > 0, "Token amount must be > 0");
+        require(zarRate   > 0, "Rate must be > 0");
+        require(zarAmount > 0, "ZAR amount must be > 0");
 
-        adId = listingCount++;
+        uint256 adId = _nextAdId++;
 
-        listings[adId] = Ad({
+        ads[adId] = Ad({
             seller:          msg.sender,
             buyer:           address(0),
-            token:           _token,
-            tokenAmount:     _tokenAmount,
-            ethPrice:        _ethPrice,
-            status:          Status.Active,
-            sellerConfirmed: false,
-            buyerConfirmed:  false
+            zarRate:         zarRate,
+            zarAmount:       zarAmount,
+            tokenAmount:     tokenAmount,
+            paymentDeadline: 0,
+            status:          Status.Active
         });
 
-        IERC20(_token).safeTransferFrom(msg.sender, address(this), _tokenAmount);
-
-        emit AdPosted(adId, msg.sender, _token, _tokenAmount, _ethPrice);
-    }
-
-    
-    function lockTrade(uint256 adId) external payable inStatus(adId, Status.Active) {
-        Ad storage ad = listings[adId];
-        require(msg.sender != ad.seller,  "Seller cannot be the buyer");
-        require(msg.sender != arbiter,    "Arbiter cannot be the buyer");
-        require(msg.value == ad.ethPrice, "Send exact ETH price to lock the trade");
-
-        ad.buyer  = msg.sender;
-        ad.status = Status.Locked;
-
-        emit TradeLocked(adId, msg.sender);
-    }
-
-   
-    function confirmTransaction(uint256 adId) external onlyParties(adId) {
-        Ad storage ad = listings[adId];
-        require(
-            ad.status == Status.Locked || ad.status == Status.Confirming,
-            "Trade must be locked before confirming"
-        );
-
-        if (msg.sender == ad.buyer) {
-            ad.buyerConfirmed = true;
-        } else {
-            ad.sellerConfirmed = true;
-        }
-
-        if (ad.status == Status.Locked) {
-            ad.status = Status.Confirming;
-        }
-
-        emit Confirmed(adId, msg.sender);
-
-        if (ad.buyerConfirmed && ad.sellerConfirmed) {
-            _releaseToBuyer(adId);
-        }
+        emit AdCreated(adId, msg.sender, tokenAmount, zarRate);
     }
 
 
-    function openDispute(uint256 adId) external onlyParties(adId) {
-        Ad storage ad = listings[adId];
-        require(
-            ad.status == Status.Locked || ad.status == Status.Confirming,
-            "No active trade to dispute"
-        );
+    //only buyer can call this function. Initiates the trade and sets struct status to InTrade
+    function initiateTrade(uint256 adId) external {
+        Ad storage ad = ads[adId];
+        require(ad.status == Status.Active,    "Ad not active");
+        require(ad.seller != msg.sender,       "Seller cannot buy own ad");
+
+        ad.buyer           = msg.sender;
+        ad.status          = Status.InTrade;
+        ad.paymentDeadline = block.timestamp + PAYMENT_TIMEOUT;
+
+        token.safeTransferFrom(ad.seller, address(this), ad.tokenAmount);
+
+        emit TradeInitiated(adId, msg.sender);
+    }
+
+
+    //Buyer confirm payment that is done off chain
+    function confirmPayment(uint256 adId) external {
+        Ad storage ad = ads[adId];
+        require(ad.status == Status.InTrade,          "Trade not in progress");
+        require(ad.buyer  == msg.sender,               "Only buyer");
+        require(block.timestamp <= ad.paymentDeadline, "Payment window expired");
+
+        ad.status = Status.Paid;
+
+        emit PaymentConfirmed(adId);
+    }
+
+    //seller tokens are taken from their wallet
+    function releaseFunds(uint256 adId) external {
+        Ad storage ad = ads[adId];
+        require(ad.status == Status.Paid,  "Payment not confirmed yet");
+        require(ad.seller == msg.sender,   "Only seller");
+
+        ad.status = Status.Completed;
+
+        token.safeTransfer(ad.buyer, ad.tokenAmount);
+
+        emit FundsReleased(adId);
+    }
+
+    //seller can cancel trade if they want to
+    function cancelAd(uint256 adId) external {
+        Ad storage ad = ads[adId];
+        require(ad.status == Status.Active, "Can only cancel an active ad");
+        require(ad.seller == msg.sender,    "Only seller");
+
+        ad.status = Status.Cancelled;
+
+        emit AdCancelled(adId);
+    }
+
+    function claimExpiredTrade(uint256 adId) external {
+        Ad storage ad = ads[adId];
+        require(ad.status == Status.InTrade,           "Trade not in progress");
+        require(block.timestamp > ad.paymentDeadline,  "Payment window still open");
+        require(ad.seller == msg.sender,               "Only seller");
+
+        address expiredBuyer  = ad.buyer;
+        ad.buyer              = address(0);
+        ad.paymentDeadline    = 0;
+        ad.status             = Status.Active;
+
+        token.safeTransfer(ad.seller, ad.tokenAmount);
+
+        emit TradeExpired(adId, expiredBuyer);
+    }
+
+    function openDispute(uint256 adId) external {
+        Ad storage ad = ads[adId];
+        require(ad.status == Status.Paid, "Payment must be confirmed first");
+        require(msg.sender == ad.buyer || msg.sender == ad.seller, "Only buyer or seller");
+
         ad.status = Status.Disputed;
-        emit Disputed(adId, msg.sender);
+
+        emit DisputeOpened(adId, msg.sender);
     }
 
-  
-    function resolveDispute(uint256 adId, bool releaseToBuyer)
-        external
-        onlyArbiter
-        inStatus(adId, Status.Disputed)
-    {
-        Ad storage ad = listings[adId];
+    function resolveDispute(uint256 adId, bool releaseToBuyer) external onlyArbiterPool {
+        Ad storage ad = ads[adId];
+        require(ad.status == Status.Disputed, "Not disputed");
+
+        ad.status = Status.Completed;
 
         if (releaseToBuyer) {
-            ad.status = Status.Refunded;
-            IERC20(ad.token).safeTransfer(ad.seller, ad.tokenAmount);
-            (bool ethRefunded, ) = ad.buyer.call{value: ad.ethPrice}("");
-            require(ethRefunded, "ETH refund to buyer failed");
+            token.safeTransfer(ad.buyer,  ad.tokenAmount);
         } else {
-            _releaseToBuyer(adId);
+            token.safeTransfer(ad.seller, ad.tokenAmount);
         }
 
-        emit Resolved(adId, msg.sender, releaseToBuyer);
+        emit DisputeResolved(adId, releaseToBuyer);
     }
 
-    function _releaseToBuyer(uint256 adId) internal {
-        Ad storage ad = listings[adId];
-        ad.status = Status.Completed;
-        IERC20(ad.token).safeTransfer(ad.buyer, ad.tokenAmount);
-        (bool ethSent, ) = ad.seller.call{value: ad.ethPrice}("");
-        require(ethSent, "ETH transfer to seller failed");
+    function setArbiterPool(address _arbiterPool) external onlyOwner {
+        arbiterPool = _arbiterPool;
     }
 
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}

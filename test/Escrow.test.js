@@ -3,160 +3,317 @@ const { ethers, upgrades } = require("hardhat");
 
 describe("Escrow", function () {
     let escrow, usdc;
-    let owner, seller, buyer, arbiter, other;
+    let owner, seller, buyer, arbiterPool, other;
 
-    const TOKEN_AMOUNT = ethers.parseUnits("100", 6); // 100 USDC
-    const ETH_PRICE    = ethers.parseEther("0.1");    // 0.1 ETH
+    const TOKEN_AMOUNT = ethers.parseUnits("100", 6);
+    const ZAR_RATE     = 18n;
+    const ZAR_AMOUNT   = 1800n;
+    const SELLER_MINT  = ethers.parseUnits("10000", 6);
 
     beforeEach(async function () {
-        [owner, seller, buyer, arbiter, other] = await ethers.getSigners();
+        [owner, seller, buyer, arbiterPool, other] = await ethers.getSigners();
 
-        // Deploy MockUSDC and give seller some tokens
         const USDCFactory = await ethers.getContractFactory("MockUSDC");
         usdc = await USDCFactory.deploy();
-        await usdc.mint(seller.address, ethers.parseUnits("1000", 6));
+        await usdc.mint(seller.address, SELLER_MINT);
 
-        // Deploy Escrow proxy with allowed token and global arbiter
         const EscrowFactory = await ethers.getContractFactory("Escrow", owner);
         escrow = await upgrades.deployProxy(
             EscrowFactory,
-            [await usdc.getAddress(), arbiter.address],
+            [await usdc.getAddress(), arbiterPool.address],
             { initializer: "initialize", kind: "uups" }
         );
 
-        // Seller approves escrow to pull USDC
-        await usdc.connect(seller).approve(await escrow.getAddress(), TOKEN_AMOUNT);
+        await usdc.connect(seller).approve(await escrow.getAddress(), SELLER_MINT);
     });
 
     describe("Deployment", function () {
-        it("Should set the correct allowedToken and arbiter", async function () {
-            expect(await escrow.allowedToken()).to.equal(await usdc.getAddress());
-            expect(await escrow.arbiter()).to.equal(arbiter.address);
+        it("Should set the correct token and arbiterPool", async function () {
+            expect(await escrow.token()).to.equal(await usdc.getAddress());
+            expect(await escrow.arbiterPool()).to.equal(arbiterPool.address);
         });
     });
 
-    describe("Post Ad", function () {
-        it("Should let the seller post an ad and pull USDC into escrow", async function () {
-            await escrow.connect(seller).postAd(await usdc.getAddress(), TOKEN_AMOUNT, ETH_PRICE);
+    describe("createAd", function () {
+        it("Should let the seller create an ad", async function () {
+            await escrow.connect(seller).createAd(ZAR_RATE, ZAR_AMOUNT, TOKEN_AMOUNT);
 
-            const ad = await escrow.listings(0);
+            const ad = await escrow.ads(0);
             expect(ad.seller).to.equal(seller.address);
+            expect(ad.zarRate).to.equal(ZAR_RATE);
+            expect(ad.zarAmount).to.equal(ZAR_AMOUNT);
             expect(ad.tokenAmount).to.equal(TOKEN_AMOUNT);
-            expect(ad.ethPrice).to.equal(ETH_PRICE);
             expect(ad.status).to.equal(0n); // Active
+        });
 
+        it("Should reject zero tokenAmount", async function () {
+            await expect(
+                escrow.connect(seller).createAd(ZAR_RATE, ZAR_AMOUNT, 0)
+            ).to.be.revertedWith("Token amount must be > 0");
+        });
+
+        it("Should reject zero zarRate", async function () {
+            await expect(
+                escrow.connect(seller).createAd(0, ZAR_AMOUNT, TOKEN_AMOUNT)
+            ).to.be.revertedWith("Rate must be > 0");
+        });
+
+        it("Should reject zero zarAmount", async function () {
+            await expect(
+                escrow.connect(seller).createAd(ZAR_RATE, 0, TOKEN_AMOUNT)
+            ).to.be.revertedWith("ZAR amount must be > 0");
+        });
+    });
+
+    describe("initiateTrade", function () {
+        beforeEach(async function () {
+            await escrow.connect(seller).createAd(ZAR_RATE, ZAR_AMOUNT, TOKEN_AMOUNT);
+        });
+
+        it("Should let the buyer initiate a trade and pull tokens from seller into escrow", async function () {
+            const sellerBalanceBefore = await usdc.balanceOf(seller.address);
+
+            await escrow.connect(buyer).initiateTrade(0);
+
+            const ad = await escrow.ads(0);
+            expect(ad.buyer).to.equal(buyer.address);
+            expect(ad.status).to.equal(1n); // InTrade
+            expect(ad.paymentDeadline).to.be.gt(0n);
+
+            expect(await usdc.balanceOf(seller.address)).to.equal(sellerBalanceBefore - TOKEN_AMOUNT);
             expect(await usdc.balanceOf(await escrow.getAddress())).to.equal(TOKEN_AMOUNT);
         });
 
-        it("Should reject a token not on the whitelist", async function () {
-            const OtherFactory = await ethers.getContractFactory("MockUSDC");
-            const otherToken   = await OtherFactory.deploy();
+        it("Should reject if ad is not active", async function () {
+            await escrow.connect(buyer).initiateTrade(0);
             await expect(
-                escrow.connect(seller).postAd(await otherToken.getAddress(), TOKEN_AMOUNT, ETH_PRICE)
-            ).to.be.revertedWith("Token not allowed");
+                escrow.connect(other).initiateTrade(0)
+            ).to.be.revertedWith("Ad not active");
         });
 
-        it("Should prevent the arbiter from posting an ad", async function () {
-            await usdc.mint(arbiter.address, TOKEN_AMOUNT);
-            await usdc.connect(arbiter).approve(await escrow.getAddress(), TOKEN_AMOUNT);
+        it("Should prevent the seller from buying their own ad", async function () {
             await expect(
-                escrow.connect(arbiter).postAd(await usdc.getAddress(), TOKEN_AMOUNT, ETH_PRICE)
-            ).to.be.revertedWith("Arbiter cannot be the seller");
+                escrow.connect(seller).initiateTrade(0)
+            ).to.be.revertedWith("Seller cannot buy own ad");
         });
     });
 
-    describe("Lock Trade", function () {
+    describe("confirmPayment", function () {
         beforeEach(async function () {
-            await escrow.connect(seller).postAd(await usdc.getAddress(), TOKEN_AMOUNT, ETH_PRICE);
+            await escrow.connect(seller).createAd(ZAR_RATE, ZAR_AMOUNT, TOKEN_AMOUNT);
+            await escrow.connect(buyer).initiateTrade(0);
         });
 
-        it("Should let the buyer lock the trade by sending exact ETH", async function () {
-            await escrow.connect(buyer).lockTrade(0, { value: ETH_PRICE });
-
-            const ad = await escrow.listings(0);
-            expect(ad.buyer).to.equal(buyer.address);
-            expect(ad.status).to.equal(1n); // Locked
+        it("Should let the buyer confirm payment", async function () {
+            await escrow.connect(buyer).confirmPayment(0);
+            expect((await escrow.ads(0)).status).to.equal(2n); // Paid
         });
 
-        it("Should reject the wrong ETH amount", async function () {
+        it("Should reject if caller is not the buyer", async function () {
             await expect(
-                escrow.connect(buyer).lockTrade(0, { value: ethers.parseEther("0.05") })
-            ).to.be.revertedWith("Send exact ETH price to lock the trade");
+                escrow.connect(other).confirmPayment(0)
+            ).to.be.revertedWith("Only buyer");
         });
 
-        it("Should prevent the seller from being the buyer", async function () {
-            await expect(
-                escrow.connect(seller).lockTrade(0, { value: ETH_PRICE })
-            ).to.be.revertedWith("Seller cannot be the buyer");
-        });
+        it("Should reject if payment window has expired", async function () {
+            await ethers.provider.send("evm_increaseTime", [301]);
+            await ethers.provider.send("evm_mine");
 
-        it("Should prevent the arbiter from being the buyer", async function () {
             await expect(
-                escrow.connect(arbiter).lockTrade(0, { value: ETH_PRICE })
-            ).to.be.revertedWith("Arbiter cannot be the buyer");
+                escrow.connect(buyer).confirmPayment(0)
+            ).to.be.revertedWith("Payment window expired");
         });
     });
 
-    describe("Confirm Transaction", function () {
+    describe("releaseFunds", function () {
         beforeEach(async function () {
-            await escrow.connect(seller).postAd(await usdc.getAddress(), TOKEN_AMOUNT, ETH_PRICE);
-            await escrow.connect(buyer).lockTrade(0, { value: ETH_PRICE });
+            await escrow.connect(seller).createAd(ZAR_RATE, ZAR_AMOUNT, TOKEN_AMOUNT);
+            await escrow.connect(buyer).initiateTrade(0);
+            await escrow.connect(buyer).confirmPayment(0);
         });
 
-        it("Should move to Confirming when one party confirms", async function () {
-            await escrow.connect(seller).confirmTransaction(0);
-            expect((await escrow.listings(0)).status).to.equal(2n); // Confirming
+        it("Should release tokens to the buyer", async function () {
+            const buyerBalanceBefore = await usdc.balanceOf(buyer.address);
+
+            await escrow.connect(seller).releaseFunds(0);
+
+            expect((await escrow.ads(0)).status).to.equal(3n); // Completed
+            expect(await usdc.balanceOf(buyer.address)).to.equal(buyerBalanceBefore + TOKEN_AMOUNT);
         });
 
-        it("Should release funds to both parties when both confirm", async function () {
-            const buyerUsdcBefore = await usdc.balanceOf(buyer.address);
-            const sellerEthBefore = await ethers.provider.getBalance(seller.address);
+        it("Should reject if caller is not the seller", async function () {
+            await expect(
+                escrow.connect(buyer).releaseFunds(0)
+            ).to.be.revertedWith("Only seller");
+        });
 
-            await escrow.connect(seller).confirmTransaction(0);
-            await escrow.connect(buyer).confirmTransaction(0);
+        it("Should reject if payment not confirmed", async function () {
+            await escrow.connect(seller).createAd(ZAR_RATE, ZAR_AMOUNT, TOKEN_AMOUNT);
+            await escrow.connect(buyer).initiateTrade(1);
 
-            expect((await escrow.listings(0)).status).to.equal(3n); // Completed
-            expect(await usdc.balanceOf(buyer.address)).to.equal(buyerUsdcBefore + TOKEN_AMOUNT);
-            expect(await ethers.provider.getBalance(seller.address)).to.be.gt(sellerEthBefore);
+            await expect(
+                escrow.connect(seller).releaseFunds(1)
+            ).to.be.revertedWith("Payment not confirmed yet");
         });
     });
 
-    describe("Dispute Resolution", function () {
+    describe("cancelAd", function () {
         beforeEach(async function () {
-            await escrow.connect(seller).postAd(await usdc.getAddress(), TOKEN_AMOUNT, ETH_PRICE);
-            await escrow.connect(buyer).lockTrade(0, { value: ETH_PRICE });
+            await escrow.connect(seller).createAd(ZAR_RATE, ZAR_AMOUNT, TOKEN_AMOUNT);
         });
 
-        it("Should allow either party to open a dispute", async function () {
-            await escrow.connect(buyer).openDispute(0);
-            expect((await escrow.listings(0)).status).to.equal(4n); // Disputed
+        it("Should let the seller cancel an active ad", async function () {
+            await escrow.connect(seller).cancelAd(0);
+            expect((await escrow.ads(0)).status).to.equal(4n); // Cancelled
         });
 
-        it("Should complete the trade when arbiter rules in seller's favour", async function () {
-            await escrow.connect(buyer).openDispute(0);
-            const buyerUsdcBefore = await usdc.balanceOf(buyer.address);
-
-            await escrow.connect(arbiter).resolveDispute(0, false); // seller wins
-
-            expect((await escrow.listings(0)).status).to.equal(3n); // Completed
-            expect(await usdc.balanceOf(buyer.address)).to.equal(buyerUsdcBefore + TOKEN_AMOUNT);
+        it("Should reject if caller is not the seller", async function () {
+            await expect(
+                escrow.connect(buyer).cancelAd(0)
+            ).to.be.revertedWith("Only seller");
         });
 
-        it("Should refund both parties when arbiter rules in buyer's favour", async function () {
-            await escrow.connect(buyer).openDispute(0);
-            const sellerUsdcBefore = await usdc.balanceOf(seller.address);
+        it("Should reject if ad is not active", async function () {
+            await escrow.connect(buyer).initiateTrade(0);
+            await expect(
+                escrow.connect(seller).cancelAd(0)
+            ).to.be.revertedWith("Can only cancel an active ad");
+        });
+    });
 
-            await escrow.connect(arbiter).resolveDispute(0, true); // buyer wins
-
-            expect((await escrow.listings(0)).status).to.equal(5n); // Refunded
-            expect(await usdc.balanceOf(seller.address)).to.equal(sellerUsdcBefore + TOKEN_AMOUNT);
+    describe("claimExpiredTrade", function () {
+        beforeEach(async function () {
+            await escrow.connect(seller).createAd(ZAR_RATE, ZAR_AMOUNT, TOKEN_AMOUNT);
+            await escrow.connect(buyer).initiateTrade(0);
         });
 
-        it("Should prevent a non-arbiter from resolving", async function () {
+        it("Should let the seller reclaim tokens after deadline and reset ad to Active", async function () {
+            const sellerBalanceBefore = await usdc.balanceOf(seller.address);
+
+            await ethers.provider.send("evm_increaseTime", [301]);
+            await ethers.provider.send("evm_mine");
+
+            await escrow.connect(seller).claimExpiredTrade(0);
+
+            const ad = await escrow.ads(0);
+            expect(ad.status).to.equal(0n); // Active
+            expect(ad.buyer).to.equal(ethers.ZeroAddress);
+            expect(ad.paymentDeadline).to.equal(0n);
+            expect(await usdc.balanceOf(seller.address)).to.equal(sellerBalanceBefore + TOKEN_AMOUNT);
+        });
+
+        it("Should reject if payment window is still open", async function () {
+            await expect(
+                escrow.connect(seller).claimExpiredTrade(0)
+            ).to.be.revertedWith("Payment window still open");
+        });
+
+        it("Should reject if caller is not the seller", async function () {
+            await ethers.provider.send("evm_increaseTime", [301]);
+            await ethers.provider.send("evm_mine");
+
+            await expect(
+                escrow.connect(other).claimExpiredTrade(0)
+            ).to.be.revertedWith("Only seller");
+        });
+
+        it("Should reject if trade is not in progress", async function () {
+            await escrow.connect(buyer).confirmPayment(0);
+            await ethers.provider.send("evm_increaseTime", [301]);
+            await ethers.provider.send("evm_mine");
+
+            await expect(
+                escrow.connect(seller).claimExpiredTrade(0)
+            ).to.be.revertedWith("Trade not in progress");
+        });
+    });
+
+    describe("openDispute", function () {
+        beforeEach(async function () {
+            await escrow.connect(seller).createAd(ZAR_RATE, ZAR_AMOUNT, TOKEN_AMOUNT);
+            await escrow.connect(buyer).initiateTrade(0);
+            await escrow.connect(buyer).confirmPayment(0);
+        });
+
+        it("Should let the buyer open a dispute", async function () {
             await escrow.connect(buyer).openDispute(0);
+            expect((await escrow.ads(0)).status).to.equal(5n); // Disputed
+        });
+
+        it("Should let the seller open a dispute", async function () {
+            await escrow.connect(seller).openDispute(0);
+            expect((await escrow.ads(0)).status).to.equal(5n); // Disputed
+        });
+
+        it("Should reject if payment not confirmed first", async function () {
+            await escrow.connect(seller).createAd(ZAR_RATE, ZAR_AMOUNT, TOKEN_AMOUNT);
+            await escrow.connect(buyer).initiateTrade(1);
+
+            await expect(
+                escrow.connect(buyer).openDispute(1)
+            ).to.be.revertedWith("Payment must be confirmed first");
+        });
+
+        it("Should reject if caller is neither buyer nor seller", async function () {
+            await expect(
+                escrow.connect(other).openDispute(0)
+            ).to.be.revertedWith("Only buyer or seller");
+        });
+    });
+
+    describe("resolveDispute", function () {
+        beforeEach(async function () {
+            await escrow.connect(seller).createAd(ZAR_RATE, ZAR_AMOUNT, TOKEN_AMOUNT);
+            await escrow.connect(buyer).initiateTrade(0);
+            await escrow.connect(buyer).confirmPayment(0);
+            await escrow.connect(buyer).openDispute(0);
+        });
+
+        it("Should release tokens to buyer when arbiter rules in buyer's favour", async function () {
+            const buyerBalanceBefore = await usdc.balanceOf(buyer.address);
+
+            await escrow.connect(arbiterPool).resolveDispute(0, true);
+
+            expect((await escrow.ads(0)).status).to.equal(3n); // Completed
+            expect(await usdc.balanceOf(buyer.address)).to.equal(buyerBalanceBefore + TOKEN_AMOUNT);
+        });
+
+        it("Should return tokens to seller when arbiter rules in seller's favour", async function () {
+            const sellerBalanceBefore = await usdc.balanceOf(seller.address);
+
+            await escrow.connect(arbiterPool).resolveDispute(0, false);
+
+            expect((await escrow.ads(0)).status).to.equal(3n); // Completed
+            expect(await usdc.balanceOf(seller.address)).to.equal(sellerBalanceBefore + TOKEN_AMOUNT);
+        });
+
+        it("Should reject if caller is not the arbiter pool", async function () {
             await expect(
                 escrow.connect(other).resolveDispute(0, true)
-            ).to.be.revertedWith("Only the arbiter");
+            ).to.be.revertedWith("Only arbiter pool");
+        });
+
+        it("Should reject if ad is not disputed", async function () {
+            await escrow.connect(seller).createAd(ZAR_RATE, ZAR_AMOUNT, TOKEN_AMOUNT);
+            await escrow.connect(buyer).initiateTrade(1);
+            await escrow.connect(buyer).confirmPayment(1);
+
+            await expect(
+                escrow.connect(arbiterPool).resolveDispute(1, true)
+            ).to.be.revertedWith("Not disputed");
+        });
+    });
+
+    describe("setArbiterPool", function () {
+        it("Should let the owner update the arbiter pool", async function () {
+            await escrow.connect(owner).setArbiterPool(other.address);
+            expect(await escrow.arbiterPool()).to.equal(other.address);
+        });
+
+        it("Should reject if caller is not the owner", async function () {
+            await expect(
+                escrow.connect(other).setArbiterPool(other.address)
+            ).to.be.revertedWithCustomError(escrow, "OwnableUnauthorizedAccount");
         });
     });
 });
