@@ -4,7 +4,7 @@ const MINT_AMOUNT = ethers.parseUnits("10000", 6); // 10,000 USDC (6 decimals)
 
 async function main() {
     const [deployer] = await ethers.getSigners();
-    const arbiterPoolAddress = process.env.ARBITER_ADDRESS;
+    const arbiterPoolAddress = process.env.ARBITERPOOL_ADDRESS || ethers.ZeroAddress;
 
     console.log("Deployer / seller:", deployer.address);
 

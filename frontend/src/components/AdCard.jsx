@@ -1,19 +1,26 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ethers } from "ethers";
 
-// Matches contract enum: Active(0) Locked(1) Confirming(2) Completed(3) Disputed(4) Refunded(5)
+// Status enum: Active(0) InTrade(1) Paid(2) Completed(3) Cancelled(4) Disputed(5)
 const STATUS = {
-  0: { label: "Active",     cls: "status-active"     },
-  1: { label: "Locked",     cls: "status-pending"    },
-  2: { label: "Confirming", cls: "status-confirming" },
-  3: { label: "Completed",  cls: "status-completed"  },
-  4: { label: "Disputed",   cls: "status-disputed"   },
-  5: { label: "Refunded",   cls: "status-refunded"   },
+  0: { label: "Active",    cls: "status-active"     },
+  1: { label: "In Trade",  cls: "status-pending"    },
+  2: { label: "Paid",      cls: "status-confirming" },
+  3: { label: "Completed", cls: "status-completed"  },
+  4: { label: "Cancelled", cls: "status-refunded"   },
+  5: { label: "Disputed",  cls: "status-disputed"   },
 };
+
+const USDC_ADDRESS = import.meta.env.VITE_USDC_ADDRESS;
+const ERC20_ABI    = ["function approve(address spender, uint256 amount) returns (bool)"];
 
 function short(addr) {
   if (!addr || addr === ethers.ZeroAddress) return "—";
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+}
+
+function fmt(bigint) {
+  return Number(bigint).toLocaleString("en-ZA");
 }
 
 function UsdcIcon() {
@@ -44,29 +51,46 @@ function UsdcIcon() {
   );
 }
 
-export default function AdCard({ ad, account, arbiter, contract, onAction }) {
+function Countdown({ deadlineSeconds }) {
+  const [remaining, setRemaining] = useState(0);
+
+  useEffect(() => {
+    function tick() {
+      const secs = Math.max(0, Math.floor(Number(deadlineSeconds) - Date.now() / 1000));
+      setRemaining(secs);
+    }
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [deadlineSeconds]);
+
+  if (remaining === 0) return <span className="deadline expired">Payment window expired</span>;
+  const m = Math.floor(remaining / 60);
+  const s = remaining % 60;
+  return (
+    <span className="deadline">
+      Payment window: {m}:{String(s).padStart(2, "0")} remaining
+    </span>
+  );
+}
+
+export default function AdCard({ ad, account, contract, onAction }) {
   const [loading, setLoading] = useState(false);
+  const [step,    setStep]    = useState(null);
   const [error,   setError]   = useState(null);
 
-  const status    = Number(ad.status);
-  const isSeller  = account?.toLowerCase() === ad.seller?.toLowerCase();
-  const isBuyer   = account?.toLowerCase() === ad.buyer?.toLowerCase();
-  const isArbiter = account?.toLowerCase() === arbiter?.toLowerCase();
-  const inTrade   = isSeller || isBuyer;
+  const status   = Number(ad.status);
+  const isSeller = account?.toLowerCase() === ad.seller?.toLowerCase();
+  const isBuyer  = account?.toLowerCase() === ad.buyer?.toLowerCase();
 
-  const tradeIsLive    = status === 1 || status === 2;
-  const myConfirmed    = isSeller ? ad.sellerConfirmed : isBuyer ? ad.buyerConfirmed  : false;
-  const otherConfirmed = isSeller ? ad.buyerConfirmed  : isBuyer ? ad.sellerConfirmed : false;
-  const otherLabel     = isSeller ? "buyer" : "seller";
+  const deadlineExpired =
+    Number(ad.paymentDeadline) > 0 &&
+    Date.now() / 1000 > Number(ad.paymentDeadline);
 
-  const canLock    = status === 0 && !isSeller && !isArbiter && !!account;
-  const canConfirm = inTrade && tradeIsLive && !myConfirmed;
-  const canDispute = inTrade && tradeIsLive;
-  const canResolve = status === 4 && isArbiter;
-
-  async function call(fn) {
+  async function call(fn, stepLabel) {
     setError(null);
     setLoading(true);
+    setStep(stepLabel ?? null);
     try {
       const tx = await fn();
       await tx.wait();
@@ -75,17 +99,39 @@ export default function AdCard({ ad, account, arbiter, contract, onAction }) {
       setError(err.code === "ACTION_REJECTED" ? "Transaction rejected." : err.message);
     } finally {
       setLoading(false);
+      setStep(null);
     }
   }
 
-  const lockTrade     = () => call(() => contract.lockTrade(ad.id, { value: ad.ethPrice }));
-  const confirmTrade  = () => call(() => contract.confirmTransaction(ad.id));
-  const openDispute   = () => call(() => contract.openDispute(ad.id));
-  // resolveDispute(adId, releaseToBuyer):
-  //   false → complete: USDC→buyer, ETH→seller
-  //   true  → cancel: USDC→seller, ETH→buyer
-  const completeTrade = () => call(() => contract.resolveDispute(ad.id, false));
-  const cancelTrade   = () => call(() => contract.resolveDispute(ad.id, true));
+  const initiateTrade   = () => call(() => contract.initiateTrade(ad.id));
+  const confirmPayment  = () => call(() => contract.confirmPayment(ad.id));
+  const cancelAd        = () => call(() => contract.cancelAd(ad.id));
+  const claimExpired    = () => call(() => contract.claimExpiredTrade(ad.id));
+  const openDispute     = () => call(() => contract.openDispute(ad.id));
+
+  async function releaseFunds() {
+    setError(null);
+    setLoading(true);
+    try {
+      const proxyAddress = await contract.getAddress();
+      const usdc = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, contract.runner);
+
+      setStep("Step 1/2 — Approving USDC…");
+      const approveTx = await usdc.approve(proxyAddress, ad.tokenAmount);
+      await approveTx.wait();
+
+      setStep("Step 2/2 — Releasing funds…");
+      const releaseTx = await contract.releaseFunds(ad.id);
+      await releaseTx.wait();
+
+      onAction();
+    } catch (err) {
+      setError(err.code === "ACTION_REJECTED" ? "Transaction rejected." : err.message);
+    } finally {
+      setLoading(false);
+      setStep(null);
+    }
+  }
 
   const st = STATUS[status] ?? STATUS[0];
 
@@ -101,15 +147,15 @@ export default function AdCard({ ad, account, arbiter, contract, onAction }) {
         <span className={`status-pill ${st.cls}`}>{st.label}</span>
       </div>
 
-      {/* Amount */}
+      {/* USDC amount */}
       <div className="ad-amount">
         {ethers.formatUnits(ad.tokenAmount, 6)}<span>USDC</span>
       </div>
 
-      {/* ETH price */}
+      {/* ZAR pricing row */}
       <div className="ad-price-row">
-        <span className="ad-price">{ethers.formatEther(ad.ethPrice)} ETH</span>
-        <span className="ad-price-label">required to lock</span>
+        <span className="ad-price">R {fmt(ad.zarAmount)}</span>
+        <span className="ad-price-label">@ R {fmt(ad.zarRate)}/USDC</span>
       </div>
 
       {/* Seller / buyer */}
@@ -132,79 +178,93 @@ export default function AdCard({ ad, account, arbiter, contract, onAction }) {
         )}
       </div>
 
-      {/* Confirmation progress (Locked / Confirming) */}
-      {tradeIsLive && (
-        <div className="confirm-progress">
-          <div className={`confirm-step ${ad.sellerConfirmed ? "done" : ""}`}>
-            <span className="confirm-check">{ad.sellerConfirmed ? "✓" : "○"}</span>
-            Seller
-          </div>
-          <div className="confirm-line" />
-          <div className={`confirm-step ${ad.buyerConfirmed ? "done" : ""}`}>
-            <span className="confirm-check">{ad.buyerConfirmed ? "✓" : "○"}</span>
-            Buyer
-          </div>
+      {/* Payment deadline countdown (InTrade only) */}
+      {status === 1 && Number(ad.paymentDeadline) > 0 && (
+        <div className="deadline-row">
+          <Countdown deadlineSeconds={ad.paymentDeadline} />
         </div>
       )}
 
       {/* Actions */}
       <div className="ad-actions">
+        {step  && <p className="step-indicator">{step}</p>}
         {error && <p className="msg-error">{error}</p>}
 
-        {/* Active — any connected non-seller can buy */}
-        {canLock && (
-          <button className="btn-buy" onClick={lockTrade} disabled={loading}>
-            {loading ? "Sending ETH…" : `Buy — ${ethers.formatEther(ad.ethPrice)} ETH`}
+        {/* ── Active ── */}
+        {status === 0 && !isSeller && !!account && (
+          <button className="btn-buy" onClick={initiateTrade} disabled={loading}>
+            {loading ? "Initiating…" : "Initiate Trade"}
+          </button>
+        )}
+        {status === 0 && isSeller && (
+          <div className="action-group">
+            <p className="action-note">Your listing is live. Waiting for a buyer.</p>
+            <button className="btn-dispute" onClick={cancelAd} disabled={loading}>
+              {loading ? "Cancelling…" : "Cancel Ad"}
+            </button>
+          </div>
+        )}
+
+        {/* ── InTrade ── */}
+        {status === 1 && isBuyer && !deadlineExpired && (
+          <div className="action-group">
+            <p className="action-note">
+              Send <strong>R {fmt(ad.zarAmount)}</strong> to the seller via your preferred
+              payment method, then confirm below.
+            </p>
+            <button className="btn-confirm" onClick={confirmPayment} disabled={loading}>
+              {loading ? "Confirming…" : "I've Paid — Confirm Payment"}
+            </button>
+          </div>
+        )}
+        {status === 1 && isBuyer && deadlineExpired && (
+          <p className="action-note">Payment window expired. The seller can reclaim the trade.</p>
+        )}
+        {status === 1 && isSeller && !deadlineExpired && (
+          <p className="action-note">Waiting for the buyer to confirm payment.</p>
+        )}
+        {status === 1 && isSeller && deadlineExpired && (
+          <button className="btn-confirm" onClick={claimExpired} disabled={loading}>
+            {loading ? "Claiming…" : "Claim Expired Trade"}
           </button>
         )}
 
-        {/* Active — seller sees a waiting message */}
-        {status === 0 && isSeller && (
-          <p className="action-note">Your listing is live. Waiting for a buyer.</p>
-        )}
-
-        {/* Locked / Confirming — trade parties act */}
-        {inTrade && tradeIsLive && (
+        {/* ── Paid ── */}
+        {status === 2 && isSeller && (
           <div className="action-group">
-            {canConfirm && (
-              <button className="btn-confirm" onClick={confirmTrade} disabled={loading}>
-                {loading ? "Confirming…" : "Confirm Payment"}
-              </button>
-            )}
-            {myConfirmed && !otherConfirmed && (
-              <p className="action-note">Waiting for the {otherLabel} to confirm.</p>
-            )}
-            {canDispute && (
-              <button className="btn-dispute" onClick={openDispute} disabled={loading}>
-                {loading ? "…" : "Open Dispute"}
-              </button>
-            )}
+            <p className="action-note">
+              Buyer has confirmed payment. Approve your USDC and release funds.
+            </p>
+            <button className="btn-confirm" onClick={releaseFunds} disabled={loading}>
+              {loading ? (step ?? "Processing…") : "Approve & Release Funds"}
+            </button>
+            <button className="btn-dispute" onClick={openDispute} disabled={loading}>
+              {loading ? "…" : "Open Dispute"}
+            </button>
           </div>
         )}
-
-        {/* Disputed — arbiter resolves */}
-        {canResolve && (
+        {status === 2 && isBuyer && (
           <div className="action-group">
-            <button className="btn-confirm" onClick={completeTrade} disabled={loading}>
-              {loading ? "…" : "Complete Trade"}
-            </button>
-            <button className="btn-dispute" onClick={cancelTrade} disabled={loading}>
-              {loading ? "…" : "Cancel & Refund"}
+            <p className="action-note">Payment confirmed. Waiting for the seller to release funds.</p>
+            <button className="btn-dispute" onClick={openDispute} disabled={loading}>
+              {loading ? "…" : "Open Dispute"}
             </button>
           </div>
         )}
 
-        {/* Disputed — party waits */}
-        {status === 4 && inTrade && (
-          <p className="action-note">Dispute opened. Waiting for the arbiter to resolve.</p>
-        )}
-
-        {/* Terminal states */}
+        {/* ── Completed ── */}
         {status === 3 && (
-          <p className="action-note success">Trade complete — USDC sent to buyer, ETH sent to seller.</p>
+          <p className="action-note success">Trade complete — USDC sent to buyer.</p>
         )}
+
+        {/* ── Cancelled ── */}
+        {status === 4 && (
+          <p className="action-note">Ad cancelled by the seller.</p>
+        )}
+
+        {/* ── Disputed ── */}
         {status === 5 && (
-          <p className="action-note">Trade cancelled — funds returned to both parties.</p>
+          <p className="action-note">Dispute opened. Awaiting arbiter pool resolution.</p>
         )}
       </div>
     </div>

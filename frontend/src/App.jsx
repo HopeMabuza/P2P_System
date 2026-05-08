@@ -11,11 +11,11 @@ const TABS = [
   { key: "completed", label: "Completed" },
 ];
 
-// 0=Active 1=Locked 2=Confirming 3=Completed 4=Disputed 5=Refunded
+// Status enum: Active(0) InTrade(1) Paid(2) Completed(3) Cancelled(4) Disputed(5)
 function classify(status) {
   const s = Number(status);
   if (s === 0)                       return "active";
-  if (s === 1 || s === 2 || s === 4) return "pending";
+  if (s === 1 || s === 2 || s === 5) return "pending";
   return "completed";
 }
 
@@ -24,34 +24,28 @@ export default function App() {
     useContract();
 
   const [listings,   setListings]   = useState([]);
-  const [arbiter,    setArbiter]    = useState(null);
   const [loading,    setLoading]    = useState(false);
   const [activeTab,  setActiveTab]  = useState("active");
   const [postAdOpen, setPostAdOpen] = useState(false);
-
-  useEffect(() => {
-    if (!contract) return;
-    contract.arbiter().then(setArbiter).catch(() => {});
-  }, [contract]);
 
   const fetchListings = useCallback(async () => {
     if (!contract || !isConnected) return;
     try {
       setLoading(true);
-      const count = await contract.listingCount();
+      const events = await contract.queryFilter(contract.filters.AdCreated());
       const ads = [];
-      for (let i = 0; i < Number(count); i++) {
-        const ad = await contract.listings(i);
+      for (const ev of events) {
+        const id = Number(ev.args.adId);
+        const ad = await contract.ads(id);
         ads.push({
-          id:              i,
+          id,
           seller:          ad.seller,
           buyer:           ad.buyer,
-          token:           ad.token,
+          zarRate:         ad.zarRate,
+          zarAmount:       ad.zarAmount,
           tokenAmount:     ad.tokenAmount,
-          ethPrice:        ad.ethPrice,
+          paymentDeadline: ad.paymentDeadline,
           status:          ad.status,
-          sellerConfirmed: ad.sellerConfirmed,
-          buyerConfirmed:  ad.buyerConfirmed,
         });
       }
       setListings(ads);
@@ -68,7 +62,6 @@ export default function App() {
     return () => clearInterval(interval);
   }, [fetchListings]);
 
-  // Clear listings when wallet disconnects
   useEffect(() => {
     if (!isConnected) setListings([]);
   }, [isConnected]);
@@ -123,7 +116,6 @@ export default function App() {
             <ListingsBoard
               listings={grouped[activeTab]}
               account={account}
-              arbiter={arbiter}
               contract={contract}
               onAction={fetchListings}
               activeTab={activeTab}
@@ -132,14 +124,12 @@ export default function App() {
         </main>
       ) : (
         <div className="hero">
-          {/* Animated background blobs */}
           <div className="hero-bg">
             <div className="blob b1" />
             <div className="blob b2" />
             <div className="blob b3" />
           </div>
 
-          {/* Orbital animation — the "live symbol" */}
           <div className="orbital">
             <div className="o-ring r1" />
             <div className="o-ring r2" />
@@ -154,7 +144,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* Hero text */}
           <div className="hero-text">
             <h1 className="hero-title">Stablecoin<br />Marketplace</h1>
 
@@ -165,7 +154,7 @@ export default function App() {
             </div>
 
             <p className="hero-subtitle">
-              Buy and sell USDC with ETH, secured by smart-contract escrow.
+              Buy and sell USDC with ZAR, secured by smart-contract escrow.
               Connect your wallet to view listings and post sell ads.
             </p>
 

@@ -686,7 +686,7 @@ body {
   border-top: 1px solid var(--border);
 }
 
-.action-group { display: flex; gap: 0.5rem; }
+.action-group { display: flex; flex-direction: column; gap: 0.5rem; }
 
 .action-note {
   font-size: 0.8rem;
@@ -846,3 +846,30 @@ body {
   animation: spin 0.7s linear infinite;
   flex-shrink: 0;
 }
+
+/* ── Form derived value ────────────────────────────────────── */
+.form-derived {
+  font-size: 0.85rem;
+  color: var(--text-sub);
+  background: var(--green-dim);
+  border: 1px solid rgba(5, 150, 105, 0.2);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.9rem;
+}
+
+.form-derived strong { color: var(--green); }
+
+/* ── Payment deadline countdown ────────────────────────────── */
+.deadline-row {
+  background: var(--amber-dim);
+  border: 1px solid rgba(180, 83, 9, 0.2);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.85rem;
+  font-size: 0.82rem;
+}
+
+.deadline        { color: var(--amber); font-weight: 600; }
+.deadline.expired { color: var(--red); }
+
+/* ── Cancelled card top stripe ─────────────────────────────── */
+.ad-card.status-refunded::before { background: var(--text-muted); }

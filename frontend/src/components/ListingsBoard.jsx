@@ -6,7 +6,7 @@ const EMPTY = {
   completed: { icon: "✅", text: "No completed trades yet."                                },
 };
 
-export default function ListingsBoard({ listings, account, arbiter, contract, onAction, activeTab }) {
+export default function ListingsBoard({ listings, account, contract, onAction, activeTab }) {
   const empty = EMPTY[activeTab] ?? { icon: "📋", text: "No listings." };
 
   if (listings.length === 0) {
@@ -27,7 +27,6 @@ export default function ListingsBoard({ listings, account, arbiter, contract, on
           key={ad.id}
           ad={ad}
           account={account}
-          arbiter={arbiter}
           contract={contract}
           onAction={onAction}
         />

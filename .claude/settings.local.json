@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(wsl bash -c 'export NVM_DIR=\"/home/londiwe/.nvm\" && . \"$NVM_DIR/nvm.sh\" && cd /home/londiwe/ABC/P2P_System && node --version && npx hardhat compile 2>&1')",
+      "PowerShell(wsl bash -c '/home/londiwe/.nvm/versions/node/v20.20.2/bin/node --version && /home/londiwe/.nvm/versions/node/v20.20.2/bin/npx hardhat compile 2>&1')",
+      "PowerShell(wsl bash -c 'cd /home/londiwe/ABC/P2P_System && /home/londiwe/.nvm/versions/node/v20.20.2/bin/node /home/londiwe/.nvm/versions/node/v20.20.2/bin/npx hardhat compile 2>&1')"
+    ]
+  }
+}

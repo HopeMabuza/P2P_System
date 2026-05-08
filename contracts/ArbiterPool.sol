@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+
 interface IEscrow {
     function resolveDispute(uint256 adId, bool releaseToBuyer) external;
 }
 
-contract ArbiterPool {
+contract ArbiterPool is UUPSUpgradeable, OwnableUpgradeable {
 
-    address public owner;
-    IEscrow public immutable escrow;
+    IEscrow public escrow;
 
     address[] public arbiters;
     mapping(address => bool) public isArbiter;
@@ -36,20 +38,27 @@ contract ArbiterPool {
     event VoteCast(uint256 indexed disputeId, address indexed arbiter, bool releaseToBuyer);
     event DisputeResolved(uint256 indexed disputeId, bool releaseToBuyer);
 
-    modifier onlyOwner() {
-        require(msg.sender == owner, "Only owner");
-        _;
-    }
-
     modifier onlyArbiter() {
         require(isArbiter[msg.sender], "Not an approved arbiter");
         _;
     }
 
-    constructor(address _escrow) {
-        owner = msg.sender;
+    modifier onlyEscrow() {
+        require(msg.sender == address(escrow), "Only escrow");
+        _;
+    }
+
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    function initialize(address _escrow) external initializer {
+        __Ownable_init(msg.sender);
         escrow = IEscrow(_escrow);
     }
+
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 
     function addArbiter(address _arbiter) external onlyOwner {
         require(_arbiter != address(0), "Invalid address");
@@ -76,11 +85,11 @@ contract ArbiterPool {
         return arbiters.length;
     }
 
-    function registerDispute(uint256 adId) external returns (uint256 disputeId) {
+    function registerDispute(uint256 adId) external onlyEscrow returns (uint256 disputeId) {
         require(arbiters.length >= 3, "Need at least 3 arbiters in the pool");
         require(!adDisputed[adId], "Dispute already registered for this ad");
 
-        address[3] memory assigned = _pickThreeArbituresArbitures(adId);
+        address[3] memory assigned = _pickThreeArbiters(adId);
 
         disputeId = _nextDisputeId++;
         adDisputed[adId] = true;
@@ -131,12 +140,12 @@ contract ArbiterPool {
         _resolve(disputeId, d.votesForBuyer > d.votesForSeller);
     }
 
-    function getAssignedArbitures(uint256 disputeId) external view returns (address[3] memory) {
+    function getAssignedArbiters(uint256 disputeId) external view returns (address[3] memory) {
         return disputes[disputeId].assigned;
     }
 
     // replace with proper random selection like Chainlink VRF
-    function _pickThreeArbituresArbitures(uint256) internal view returns (address[3] memory picked) {
+    function _pickThreeArbiters(uint256) internal view returns (address[3] memory picked) {
         picked = [arbiters[0], arbiters[1], arbiters[2]];
     }
 
@@ -147,7 +156,8 @@ contract ArbiterPool {
     function _resolve(uint256 disputeId, bool releaseToBuyer) internal {
         Dispute storage d = disputes[disputeId];
         d.resolved = true;
-        emit DisputeResolved(disputeId, releaseToBuyer);
         escrow.resolveDispute(d.adId, releaseToBuyer);
+        emit DisputeResolved(disputeId, releaseToBuyer);
+       
     }
 }

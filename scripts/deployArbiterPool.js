@@ -1,8 +1,8 @@
-const { ethers } = require("hardhat");
+const { ethers, upgrades } = require("hardhat");
 
 async function main() {
     const signers = await ethers.getSigners();
-    const escrowAddress = process.env.ESCROW_ADDRESS;
+    const escrowAddress = process.env.ESCROW_ADDRESS || ethers.ZeroAddress;
 
     // Fall back to local signer addresses if env vars are not set
     const arbiterAddresses = [
@@ -14,12 +14,19 @@ async function main() {
     console.log("Deployer:        ", signers[0].address);
     console.log("Escrow address:  ", escrowAddress);
 
-    // 1. Deploy ArbiterPool
+    // 1. Deploy ArbiterPool proxy
     const ArbiterPool = await ethers.getContractFactory("ArbiterPool");
-    const pool = await ArbiterPool.deploy(escrowAddress);
+    const pool = await upgrades.deployProxy(
+        ArbiterPool, [escrowAddress],
+        { initializer: "initialize", kind: "uups" }
+    );
     await pool.waitForDeployment();
+
     const poolAddress = await pool.getAddress();
-    console.log("ArbiterPool deployed:", poolAddress);
+    const implAddress = await upgrades.erc1967.getImplementationAddress(poolAddress);
+
+    console.log("Proxy address:          ", poolAddress);
+    console.log("Implementation address: ", implAddress);
 
     // 2. Register the 3 arbiters
     for (const addr of arbiterAddresses) {

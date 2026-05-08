@@ -6,6 +6,10 @@ import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
+interface IArbiterPool {
+    function registerDispute(uint256 adId) external returns (uint256 disputeId);
+}
+
 contract Escrow is UUPSUpgradeable, OwnableUpgradeable {
     //for adding token to my contract
     using SafeERC20 for IERC20;
@@ -88,8 +92,6 @@ contract Escrow is UUPSUpgradeable, OwnableUpgradeable {
         ad.status          = Status.InTrade;
         ad.paymentDeadline = block.timestamp + PAYMENT_TIMEOUT;
 
-        token.safeTransferFrom(ad.seller, address(this), ad.tokenAmount);
-
         emit TradeInitiated(adId, msg.sender);
     }
 
@@ -114,6 +116,7 @@ contract Escrow is UUPSUpgradeable, OwnableUpgradeable {
 
         ad.status = Status.Completed;
 
+        token.safeTransferFrom(ad.seller, address(this), ad.tokenAmount);
         token.safeTransfer(ad.buyer, ad.tokenAmount);
 
         emit FundsReleased(adId);
@@ -154,6 +157,8 @@ contract Escrow is UUPSUpgradeable, OwnableUpgradeable {
         ad.status = Status.Disputed;
 
         emit DisputeOpened(adId, msg.sender);
+
+        IArbiterPool(arbiterPool).registerDispute(adId);
     }
 
     function resolveDispute(uint256 adId, bool releaseToBuyer) external onlyArbiterPool {

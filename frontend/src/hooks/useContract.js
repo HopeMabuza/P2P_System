@@ -38,7 +38,12 @@ export function useContract() {
     }
 
     window.ethereum.on("accountsChanged", handleAccountChange);
-    return () => window.ethereum.removeListener("accountsChanged", handleAccountChange);
+    window.ethereum.on("chainChanged", () => window.location.reload());
+
+    return () => {
+      window.ethereum.removeListener("accountsChanged", handleAccountChange);
+      window.ethereum.removeListener("chainChanged", () => window.location.reload());
+    };
   }, []);
 
   async function connectWallet() {
